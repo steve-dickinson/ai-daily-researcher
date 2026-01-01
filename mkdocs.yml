@@ -1,0 +1,12 @@
+site_name: AI Daily Researcher
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.indexes
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md

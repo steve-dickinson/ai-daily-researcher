@@ -1,0 +1,46 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      - MONGODB_URL=mongodb://mongo:27017
+      - POSTGRES_URL=postgresql+asyncpg://user:password@postgres:5432/researcher
+    depends_on:
+      - mongo
+      - postgres
+    volumes:
+      - ./src:/app/src
+    command: streamlit run src/app.py --server.port=8501 --server.address=0.0.0.0
+
+  mongo:
+    image: mongo:latest
+    ports:
+      - "27019:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=researcher
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+  # Worker service can be enabled later for background jobs
+  # worker:
+  #   build: .
+  #   command: python src/main.py
+  #   environment:
+  #     - MONGODB_URL=mongodb://mongo:27017
+  #     - POSTGRES_URL=postgresql+asyncpg://user:password@postgres:5432/researcher
+  #   depends_on:
+  #     - mongo
+  #     - postgres
+
+volumes:
+  mongo_data:
+  postgres_data:
