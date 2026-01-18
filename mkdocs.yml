@@ -10,3 +10,7 @@ plugins:
 
 site_url: https://steve-dickinson.github.io/ai-daily-researcher/
 
+nav:
+  - Home: index.md
+  - Blog: blog/index.md
+

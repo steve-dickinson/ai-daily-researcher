@@ -75,11 +75,7 @@ uv run python src/publish_digest.py
 uv run mkdocs serve
 
 # 3. Deploy
-# Option A: Manual Deployment
-uv run mkdocs gh-deploy
-
-# Option B: Automated (CI/CD)
-# Simply push your changes to the main branch. The GitHub Action will auto-deploy.
+# Simply push your changes to memory. The GitHub Action will auto-deploy.
 git add docs/blog
 git commit -m "Update daily research blog"
 git push origin main
