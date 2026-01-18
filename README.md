@@ -68,14 +68,21 @@ The system assumes a single local user and runs entirely in containers:
 ### 🌐 Publish Static Blog
 You can export your daily digests to a static website for easy sharing:
 ```bash
-# 1. Generate content
+# 1. Generate content locally
 uv run python src/publish_digest.py
 
 # 2. Preview site
 uv run mkdocs serve
 
-# 3. Deploy to GitHub Pages (optional)
+# 3. Deploy
+# Option A: Manual Deployment
 uv run mkdocs gh-deploy
+
+# Option B: Automated (CI/CD)
+# Simply push your changes to the main branch. The GitHub Action will auto-deploy.
+git add docs/blog
+git commit -m "Update daily research blog"
+git push origin main
 ```
 
 ## 🧹 Maintenance
