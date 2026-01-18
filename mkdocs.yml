@@ -8,6 +8,5 @@ theme:
 plugins:
   - search
 
-nav:
-  - Home: index.md
-  - Daily Blog: blog/index.md
+site_url: https://steve-dickinson.github.io/ai-daily-researcher/
+
