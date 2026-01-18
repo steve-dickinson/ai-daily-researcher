@@ -1,14 +1,14 @@
+
 import asyncio
 import time
 from datetime import datetime, timedelta
-from typing import List
-from langchain_core.documents import Document
+from typing import List, Optional, Dict
+from beanie.odm.operators.find.comparison import In
 from src.ingestion.arxiv_client import ArxivClient
 from src.ai.processor import ai_processor
-from src.db.models import Paper, PaperEmbedding, DailyDigest, UserAnnotation
+from src.db.models import Paper, PaperEmbedding, DailyDigest, UserAnnotation, RSSFeedConfig
 from src.db.postgres import AsyncSessionLocal
 from sqlalchemy import select
-from beanie.operators import In
 
 from src.ingestion.rss_client import RSSClient
 
@@ -40,15 +40,32 @@ class ResearchService:
         rss_results = []
         cutoff_date = time.time() - (2 * 24 * 60 * 60)
         
-        for source, url in self.rss_client.feeds.items():
-            stats[source] = 0
-            log(f"Fetching RSS feed: {source}...")
+        feeds = await self.rss_client.get_active_feeds()
+        for feed in feeds:
+            stats[feed.name] = 0
+            log(f"Fetching RSS feed: {feed.name}...")
             try:
-                feed_posts = list(self.rss_client.fetch_single_feed(source, url, cutoff_date))
-                stats[source] = len(feed_posts)
+                # fetch_single_feed is synchronous generator
+                feed_posts = list(self.rss_client.fetch_single_feed(feed.name, feed.url, cutoff_date))
+                stats[feed.name] = len(feed_posts)
                 rss_results.extend(feed_posts)
             except Exception as e:
-                log(f"Error fetching {source}: {e}")
+                log(f"Error fetching {feed.name}: {e}")
+
+    # --- RSS Feed Management ---
+    # --- RSS Feed Management ---
+    async def get_all_feeds(self) -> List[RSSFeedConfig]:
+        return await RSSFeedConfig.find_all().to_list()
+
+    async def add_rss_feed(self, name: str, url: str):
+        if await RSSFeedConfig.find_one(RSSFeedConfig.name == name):
+            raise ValueError(f"Feed '{name}' already exists.")
+        await RSSFeedConfig(name=name, url=url).insert()
+
+    async def delete_rss_feed(self, name: str):
+        feed = await RSSFeedConfig.find_one(RSSFeedConfig.name == name)
+        if feed:
+            await feed.delete()
 
         # Standardize and Combine
         all_items = []
@@ -105,27 +122,71 @@ class ResearchService:
                 
         return True
 
-    async def generate_daily_digest(self) -> DailyDigest:
-        """Create a blog post from recent papers."""
-        cutoff = datetime.now() - timedelta(days=1)
-        papers = await Paper.find(Paper.published_date >= cutoff).to_list()
-        
+    async def generate_daily_digest(self, date: datetime = None) -> DailyDigest:
+        """Create a blog post from recent papers. If date provided, specific to that day."""
+        if date:
+            # Range: [date, date + 1 day)
+            target_date = datetime(date.year, date.month, date.day)
+            cutoff = target_date
+            end_date = target_date + timedelta(days=1)
+            
+            # Find papers published on this specific day
+            papers = await Paper.find(Paper.published_date >= cutoff, Paper.published_date < end_date).to_list()
+            
+            # Check for existing digest and delete if exists (regeneration)
+            existing = await self.get_digest_by_date(target_date)
+            if existing:
+                await existing.delete()
+                
+            digest_date = target_date
+            
+        else:
+            # Default: Last 24 hours
+            cutoff = datetime.now() - timedelta(days=1)
+            papers = await Paper.find(Paper.published_date >= cutoff).to_list()
+            digest_date = datetime.now()
+
         if not papers:
-            # Fallback for demo: use latest 5
-            papers = await Paper.find_all().sort("-published_date").limit(5).to_list()
+            # Fallback for demo ONLY if no date specified (legacy behavior)
+            if not date:
+                papers = await Paper.find_all().sort("-published_date").limit(5).to_list()
+            else:
+                return None # No papers for that date, cannot generate.
             
         if not papers:
             return None
 
-        docs = [
-            Document(page_content=p.summary_pass_1 or p.abstract, metadata={"title": p.title})
-            for p in papers
-        ]
+        if not papers:
+            return None
+
+        # Limit papers to avoid token overflow, though GPT-4o-mini has a large context window.
+        if len(papers) > 300:
+             papers = papers[:300]
+
+        # 1. Separate Content Types to ensure News isn't drowned out
+        news_items = []
+        research_papers = []
         
-        blog_content = await ai_processor.generate_blog_post(docs)
+        for p in papers:
+            # RSS items often have shorter content but are high signal
+            content = p.summary_pass_1 or p.abstract or ""
+            
+            # Truncate slightly to be safe
+            if len(content) > 4000:
+                content = content[:4000] + "..."
+            
+            item_data = f"Title: {p.title}\nSource: {p.source}\nURL: {p.pdf_url}\nContent: {content}"
+            
+            if p.source == "arxiv":
+                research_papers.append(item_data)
+            else:
+                news_items.append(item_data)
+
+        # 2. Pass structured data to the processor
+        blog_content = await ai_processor.generate_structured_digest(news_items, research_papers)
         
         digest = DailyDigest(
-            date=datetime.now(),
+            date=digest_date,
             markdown_content=blog_content,
             paper_ids=[p.unique_id for p in papers]
         )
@@ -162,7 +223,6 @@ class ResearchService:
         
         return paper
 
-    # --- Phase 3: Personalization & History ---
 
     async def toggle_bookmark(self, unique_id: str) -> bool:
         """Toggle bookmark status for a paper. Returns new status."""
@@ -200,9 +260,21 @@ class ResearchService:
         # Assuming published_date is a datetime object in Mongo
         return await Paper.find(Paper.published_date >= start, Paper.published_date < end).sort("-published_date").to_list()
 
+    async def get_all_papers_sorted(self) -> List[Paper]:
+        """Fetch all papers sorted by published_date descending."""
+        # For a large production app, we would paginate this.
+        # But for this personal researcher tool, fetching a few thousand headers is fine.
+        return await Paper.find_all().sort("-published_date").to_list()
+
     async def get_digest_by_date(self, date: datetime) -> DailyDigest:
         """Fetch digest for a specific date."""
         # Because DailyDigest.date might not be exactly midnight, use range
         start = datetime(date.year, date.month, date.day)
         end = start + timedelta(days=1)
         return await DailyDigest.find_one(DailyDigest.date >= start, DailyDigest.date < end)
+
+    async def get_latest_changelogs(self) -> Dict[str, List[Dict]]:
+        """Fetcher for the Changelog Tab."""
+        from src.ingestion.changelog_client import ChangelogClient
+        client = ChangelogClient()
+        return await client.fetch_all()

@@ -13,11 +13,12 @@ class ArxivClient:
     def fetch_recent_papers(
         self, 
         query: str = "cat:cs.AI OR cat:cs.LG OR cat:cs.CL", 
-        days_back: int = 1
+        days_back: int = 1,
+        max_results: int = 100
     ) -> Generator[arxiv.Result, None, None]:
         search = arxiv.Search(
             query=query,
-            max_results=100, 
+            max_results=max_results, 
             sort_by=arxiv.SortCriterion.SubmittedDate,
             sort_order=arxiv.SortOrder.Descending
         )

@@ -10,3 +10,4 @@ plugins:
 
 nav:
   - Home: index.md
+  - Daily Blog: blog/index.md

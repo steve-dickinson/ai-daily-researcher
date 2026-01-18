@@ -66,6 +66,17 @@ class UserAnnotation(Document):
     class Settings:
         name = "user_annotations"
 
+class RSSFeedConfig(Document):
+    """
+    Configuration for RSS feeds.
+    """
+    name: str = Field(unique=True)
+    url: str
+    is_active: bool = True
+    
+    class Settings:
+        name = "rss_feed_configs"
+
 # --- Postgres Models ---
 
 class Base(DeclarativeBase):
